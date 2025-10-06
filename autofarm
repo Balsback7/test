@@ -1,0 +1,145 @@
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+local backpack = player:WaitForChild("Backpack")
+local net = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Net")
+
+local hitRemote1 = net:WaitForChild("RE/BeachShovelHit")
+local hitRemote2 = net:WaitForChild("RE/panHit")
+local hitRemote3 = net:WaitForChild("RE/pinkStopSignalHit")
+local hitRemote4 = net:WaitForChild("RE/baseballBatHit")
+local stompEvent = ReplicatedStorage:WaitForChild("STOMPEVENT")
+
+local aboveOffset = Vector3.new(0, 6, 0)
+
+local zombieNames = {
+	["Armored Zombie"] = true,
+	["Fast Zombie"] = true,
+	["Silly Zombie"] = true
+}
+
+-- Prevent falling
+RunService.Heartbeat:Connect(function()
+	if hrp then hrp.Velocity = Vector3.zero end
+end)
+
+-- Equip 1 punches tool
+local function equipOnePunches()
+	local tool = character:FindFirstChild("1 punches") or backpack:FindFirstChild("1 punches")
+	if tool and tool.Parent ~= character then
+		pcall(function() humanoid:EquipTool(tool) end)
+	end
+end
+
+-- Get lowest-health zombie
+local function getLowestZombie()
+	local lowest, lowestHealth = nil, math.huge
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("Model") and zombieNames[obj.Name] and obj:FindFirstChild("Head") then
+			local hum = obj:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 and hum.Health < lowestHealth then
+				lowestHealth = hum.Health
+				lowest = obj
+			end
+		end
+	end
+	return lowest
+end
+
+-- Buy tools using PivotTo
+local function buyTool(toolName, buttonName)
+	if backpack:FindFirstChild(toolName) or character:FindFirstChild(toolName) then return end
+	local button = workspace:FindFirstChild(buttonName, true)
+	if not button then return end
+	character:PivotTo(button.CFrame + Vector3.new(0, 2, 0))
+	local prompt = button:FindFirstChildWhichIsA("ProximityPrompt", true)
+	if not prompt then return end
+	while not (backpack:FindFirstChild(toolName) or character:FindFirstChild(toolName)) do
+		pcall(function() fireproximityprompt(prompt) end)
+		task.wait(0.2)
+	end
+end
+
+-- Fire hit remotes
+local function fireHits()
+	pcall(function() hitRemote1:FireServer(1) end)
+	pcall(function() hitRemote2:FireServer(1) end)
+	pcall(function() hitRemote3:FireServer(1) end)
+	pcall(function() hitRemote4:FireServer(1) end)
+end
+
+-- Lock above zombie and track it in real time
+local function trackZombie(zombie)
+	while zombie and zombie:FindFirstChild("Head") and humanoid.Health > 0 do
+		local head = zombie.Head
+		local targetCFrame = CFrame.new(head.Position + aboveOffset, head.Position)
+		character:PivotTo(targetCFrame)
+		equipOnePunches()
+		pcall(function() net["RF/SalonPunch"]:InvokeServer() end)
+		fireHits()
+		task.wait(0.08)
+	end
+end
+
+-- Sky escape
+local function teleportToSkyChar(chr)
+	local root = chr and chr:FindFirstChild("HumanoidRootPart")
+	if root then
+		character:PivotTo(root.CFrame + Vector3.new(0, 500, 0))
+	end
+end
+
+-- Buy essential tools
+task.spawn(function()
+	buyTool("Pan", "Pan Buy button")
+	buyTool("BeachShovel", "botonComprarShovel")
+end)
+
+-- Equip and hit immediately
+equipOnePunches()
+task.spawn(function()
+	for i = 1, 40 do
+		pcall(function() net["RF/SalonPunch"]:InvokeServer() end)
+		task.wait(0.03)
+	end
+end)
+
+-- Continuous hit & auto-heal loop
+task.spawn(function()
+	while task.wait(0.22) do
+		equipOnePunches()
+		if humanoid.Health <= 30 then
+			pcall(function() net["RF/RequestSurgery"]:InvokeServer() end)
+		else
+			pcall(function() net["RF/SalonPunch"]:InvokeServer() end)
+			fireHits()
+		end
+	end
+end)
+
+-- Main loop: track zombies in real-time
+task.spawn(function()
+	while humanoid.Health > 0 do
+		local currentZombie = getLowestZombie()
+		if currentZombie then
+			trackZombie(currentZombie)
+		else
+			teleportToSkyChar(character)
+			task.wait(0.5)
+		end
+		task.wait(0.1)
+	end
+end)
+
+-- Keep re-equipping 1 punches every second
+task.spawn(function()
+	while task.wait(1) do
+		equipOnePunches()
+	end
+end)
