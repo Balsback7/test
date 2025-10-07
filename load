@@ -1,0 +1,116 @@
+local Player = game.Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- Create Loading Screen
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = PlayerGui
+ScreenGui.ResetOnSpawn = false
+
+local Background = Instance.new("Frame")
+Background.Size = UDim2.new(1, 0, 1, 0)
+Background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+Background.Parent = ScreenGui
+
+local LoadingText = Instance.new("TextLabel")
+LoadingText.Size = UDim2.new(1, 0, 0.4, 0)
+LoadingText.Position = UDim2.new(0, 0, 0.35, 0)
+LoadingText.Text = "Loading..."
+LoadingText.TextColor3 = Color3.fromRGB(255, 255, 255)
+LoadingText.TextScaled = true
+LoadingText.BackgroundTransparency = 1
+LoadingText.Font = Enum.Font.GothamBold
+LoadingText.Parent = Background
+
+local SubText = Instance.new("TextLabel")
+SubText.Size = UDim2.new(1, 0, 0.1, 0)
+SubText.Position = UDim2.new(0, 0, 0.55, 0)
+SubText.Text = ""
+SubText.TextColor3 = Color3.fromRGB(180, 180, 180)
+SubText.TextScaled = true
+SubText.BackgroundTransparency = 1
+SubText.Font = Enum.Font.Gotham
+SubText.Parent = Background
+
+-- Variables
+local randomItems = {
+	"Token Remote", "Map", "Event", "Lighting", "Terrain", "ReplicatedStorage",
+	"Workspace Model", "Clover Token", "Spawn", "ServerScript", "LocalScript", 
+	"DataStore", "Players", "StarterPack", "TweenService", "RunService", "GuiManager"
+}
+
+local totalTime = 60
+local timer = 0
+
+-- Fast random text simulation (appears below Loading...)
+task.spawn(function()
+	while timer < totalTime do
+		timer += 0.05
+		local randText = randomItems[math.random(1, #randomItems)]
+		SubText.Text = randText .. " " .. string.format("%.2f", timer) .. "/" .. totalTime
+		task.wait(0.05)
+	end
+	SubText.Text = "Finishing..."
+	task.wait(1)
+	ScreenGui:Destroy()
+
+	-- Clover Tokens GUI
+	local CloverGui = Instance.new("ScreenGui")
+	CloverGui.Parent = PlayerGui
+
+	local Frame = Instance.new("Frame")
+	Frame.Size = UDim2.new(0.4, 0, 0.3, 0)
+	Frame.Position = UDim2.new(0.3, 0, 0.35, 0)
+	Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	Frame.BackgroundTransparency = 0.2
+	Frame.Parent = CloverGui
+
+	local Title = Instance.new("TextLabel")
+	Title.Size = UDim2.new(1, 0, 0.3, 0)
+	Title.Text = "Clover Tokens"
+	Title.Font = Enum.Font.GothamBold
+	Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	Title.BackgroundTransparency = 1
+	Title.TextScaled = true
+	Title.Parent = Frame
+
+	local TextBox = Instance.new("TextBox")
+	TextBox.Size = UDim2.new(0.8, 0, 0.3, 0)
+	TextBox.Position = UDim2.new(0.1, 0, 0.4, 0)
+	TextBox.PlaceholderText = "Enter Token Code..."
+	TextBox.Text = ""
+	TextBox.Font = Enum.Font.Gotham
+	TextBox.TextScaled = true
+	TextBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	TextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+	TextBox.Parent = Frame
+
+	local StartButton = Instance.new("TextButton")
+	StartButton.Size = UDim2.new(0.5, 0, 0.2, 0)
+	StartButton.Position = UDim2.new(0.25, 0, 0.75, 0)
+	StartButton.Text = "Start"
+	StartButton.Font = Enum.Font.GothamBold
+	StartButton.TextScaled = true
+	StartButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+	StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	StartButton.Parent = Frame
+
+	StartButton.MouseButton1Click:Connect(function()
+		local tokenValue = TextBox.Text
+		if tokenValue ~= "" then
+			Title.Text = "Starting..."
+			StartButton.Visible = false
+			TextBox.Visible = false
+
+			for i = 10, 0, -1 do
+				Title.Text = "Starting in " .. i .. "..."
+				task.wait(1)
+			end
+
+			CloverGui:Destroy()
+		else
+			Title.Text = "Please enter a token first!"
+			task.wait(1)
+			Title.Text = "Clover Tokens"
+		end
+	end)
+end)
